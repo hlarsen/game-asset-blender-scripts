@@ -1,0 +1,7 @@
+# IDEs
+.vscode/
+.idea/
+
+# working with files locally
+assets/
+output/
