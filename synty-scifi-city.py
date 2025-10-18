@@ -55,6 +55,8 @@ def parse_args():
 def export_fbx(obj, output_path):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
+    for child in obj.children_recursive:
+        child.select_set(True)
 
     bpy.ops.export_scene.fbx(
         filepath=output_path,
@@ -80,6 +82,8 @@ def export_fbx(obj, output_path):
 def export_gltf(obj, output_path):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
+    for child in obj.children_recursive:
+        child.select_set(True)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ""),
@@ -95,6 +99,8 @@ def export_gltf(obj, output_path):
 def export_glb(obj, output_path):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
+    for child in obj.children_recursive:
+        child.select_set(True)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ""),
@@ -171,11 +177,33 @@ def fix_missing_mesh_materials(mesh):
                 node.image.filepath = texture_path
                 node.image.filepath_raw = texture_path
 
-            mat.name = "SciFi_City_Characters_Shared_Materials"
+            mat.name = os.path.basename(img_path)
             node.image.reload()
             print(f"   Texture node: {node.name}  | Filepath: {texture_path}")
 
     return mesh
+
+
+def deduplicate_images():
+    """Deduplicate images that point to the same filepath."""
+    seen = {}
+    for img in bpy.data.images[:]:
+        key = bpy.path.abspath(img.filepath) if img.filepath else img.name
+        if key in seen:
+            original = seen[key]
+            duplicate_name = img.name
+
+            for mat in bpy.data.materials:
+                if not mat.node_tree:
+                    continue
+                for node in mat.node_tree.nodes:
+                    if getattr(node, "image", None) == img:
+                        node.image = original
+
+            bpy.data.images.remove(img)
+            print(f"Removed duplicate image: {duplicate_name}, reassigned to {original.name}")
+        else:
+            seen[key] = img
 
 
 def main():
@@ -211,9 +239,9 @@ def main():
     # Process files
     skipped_files = []
     for fbx_file in fbx_files:
-        # TODO: debug testing
-        if "sm_bld_bank" not in fbx_file.lower():
-            continue
+        # NOTE: debug testing
+        # if "sm_wep_syr" not in fbx_file.lower():
+        #     continue
 
         if not os.path.basename(fbx_file).lower().startswith("sm_"):
             print(f"\n=== Skipping file that does not start with sm_: {fbx_file}")
@@ -252,6 +280,7 @@ def main():
             debug_image_datablocks()
 
             updated_obj = fix_missing_mesh_materials(obj)
+            deduplicate_images()
 
             debug_image_datablocks()
 
