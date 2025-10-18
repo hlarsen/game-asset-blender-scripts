@@ -2,6 +2,7 @@
 Blender script to take assets from the Synty SciFi City pack and set them up for easy import into Godot
 """
 import bpy
+import shutil
 import sys
 import os
 from collections import defaultdict
@@ -21,7 +22,7 @@ FILE_REPLACEMENTS = {
     "BillboardsGraffiti_01.psd": "Billboards.png",
     "PolygonCity_Road_01.png": "PolygonSciFi_Road_01.png",
     "PolygonCity_Texture_01_A.png": "PolygonScifi_01_A.png",
-    "Signs_Emission.psd": "PolygonScifi_Emissive_01.png",
+    "Signs_Emission.psd": "PolygonScifi_Emissive_01.png",  # TODO: wrong?
     "Neon_Animation.psd": "Billboards.png",
     "PolygonScifi_Texture_Mike.psd": "PolygonScifi_01_A.png",
 }
@@ -146,8 +147,8 @@ def fix_missing_mesh_materials(mesh):
                 print("   ✅ Found")
                 node.image.name = mesh.name
                 texture_path = img_path
-                node.image.filepath = texture_path
-                node.image.filepath_raw = texture_path
+                node.image.filepath = os.path.join("textures", os.path.basename(texture_path))
+                node.image.filepath_raw = node.image.filepath
             else:
                 print("   ❌ Missing, attempting to fix...")
 
@@ -167,15 +168,12 @@ def fix_missing_mesh_materials(mesh):
                 )
 
                 if not os.path.exists(texture_path):
-                    # texture_path = texture_path.replace("POLYGON_SciFi_City_SourceFiles_v4/Textures",
-                    #                                     "POLYGON_SciFi_City_SourceFiles_v4/Source_Files/Textures")
-                    # texture_path = texture_path.replace("PolygonSciFiCity_Texture_", "PolygonScifi_")
                     if not os.path.exists(texture_path):
                         raise FileNotFoundError(f"Could not find texture for object {mesh.name}: {texture_path}")
 
                 node.image.name = os.path.basename(img_path)
-                node.image.filepath = texture_path
-                node.image.filepath_raw = texture_path
+                node.image.filepath = os.path.join("textures", os.path.basename(texture_path))
+                node.image.filepath_raw = node.image.filepath
 
             mat.name = os.path.basename(img_path)
             node.image.reload()
@@ -206,6 +204,63 @@ def deduplicate_images():
             seen[key] = img
 
 
+def deduplicate_materials():
+    """Deduplicate materials that have the same texture/image setup."""
+    materials_by_texture = defaultdict(list)
+
+    # Group materials by their primary texture
+    for mat in bpy.data.materials[:]:
+        if not mat.node_tree:
+            continue
+
+        # Find the image texture node
+        texture_path = None
+        for node in mat.node_tree.nodes:
+            if node.type == "TEX_IMAGE" and node.image:
+                texture_path = node.image.filepath
+                break
+
+        if texture_path:
+            materials_by_texture[texture_path].append(mat)
+
+    # For each group of materials with the same texture, keep only one
+    for texture_path, mats in materials_by_texture.items():
+        if len(mats) <= 1:
+            continue
+
+        # Keep the material without any .00x suffix
+        primary = None
+        for m in mats:
+            # Check if name doesn't contain .00x pattern
+            if not any(m.name.endswith(f'.{i:03d}') for i in range(1, 1000)):
+                primary = m
+                break
+
+        # Fallback to first material if none found without suffix
+        if primary is None:
+            primary = mats[0]
+
+        duplicates = [m for m in mats if m != primary]
+
+        print(f"Found {len(duplicates)} duplicate materials for texture: {texture_path}")
+        print(f"  Keeping: {primary.name}")
+
+        # Reassign all objects using duplicate materials to use the primary
+        for obj in bpy.data.objects:
+            if obj.type != 'MESH':
+                continue
+
+            for slot_idx, slot in enumerate(obj.material_slots):
+                if slot.material in duplicates:
+                    print(f"  Reassigning {obj.name} slot {slot_idx} from {slot.material.name} to {primary.name}")
+                    obj.material_slots[slot_idx].material = primary
+
+        # Remove duplicate materials
+        for dup in duplicates:
+            print(f"  Removing duplicate material: {dup.name}")
+            bpy.data.materials.remove(dup)
+
+
 def main():
     input_path = parse_args()
 
@@ -225,6 +280,12 @@ def main():
         os.mkdir(output_path)
         if not os.path.isdir(output_path):
             raise FileNotFoundError(f"Output path not found")
+
+    # copy textures to output dir so our relative paths will work
+    output_textures_path = os.path.join(output_path, "textures")
+    if os.path.exists(output_textures_path):
+        shutil.rmtree(output_textures_path)
+    shutil.copytree(textures_path, output_textures_path)
 
     # Get all matching files
     fbx_files = []
@@ -271,24 +332,44 @@ def main():
 
         print(f"Scene objects: {len(bpy.context.scene.objects)}")
 
-        for obj in bpy.context.selected_objects:
-            if not obj.type == 'MESH':
-                # print(f"Object Type: {obj.type}")
-                # print("Skipping this object...")
-                raise f"Unhandled object type: {obj.type}"
+        # after import all objects are selected in no particular order, find the root object
+        roots = [obj for obj in bpy.context.selected_objects if obj.parent is None]
+        if len(roots) != 1:
+            raise RuntimeError(f"Expected exactly 1 root object, found {len(roots)}: {[o.name for o in roots]}")
 
-            debug_image_datablocks()
+        root_obj = roots[0]
+        print(f"Root object: {root_obj.name}")
 
-            updated_obj = fix_missing_mesh_materials(obj)
-            deduplicate_images()
+        # select root and all children for export
+        root_obj.select_set(True)
+        for child in root_obj.children_recursive:
+            child.select_set(True)
 
-            debug_image_datablocks()
+        # collect all objects under root
+        all_objects = [root_obj] + list(root_obj.children_recursive)
 
-            export_fbx(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-            # export_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-            # export_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # verify they are all meshes
+        non_meshes = [obj for obj in all_objects if obj.type != 'MESH']
+        if non_meshes:
+            names = [obj.name for obj in non_meshes]
+            raise RuntimeError(f"Non-mesh objects found under root '{root_obj.name}': {names}")
 
-        # break
+        debug_image_datablocks()
+
+        # fix materials for every mesh
+        for mesh in all_objects:
+            print(f"Fixing materials for: {mesh.name}")
+            fix_missing_mesh_materials(mesh)
+
+        deduplicate_images()
+        deduplicate_materials()
+
+        debug_image_datablocks()
+
+        # export object
+        export_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
 
     print("\n\n=== Finished processing")
 
