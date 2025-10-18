@@ -1,5 +1,10 @@
 """
-Blender script to take assets from the Synty SciFi City pack and set them up for easy import into Godot
+This is a Blender script to take assets from the Synty SciFi City pack and set them up for easy import into Godot.
+
+Notes:
+    - We import/export Characters and Objects with different options, please review
+    - We output individual Characters as well as a "shared" object like the original Synty fbx
+    - This doesn't fix the complete pack - files are listed at the end of the script run
 """
 import bpy
 import shutil
@@ -7,11 +12,11 @@ import sys
 import os
 from collections import defaultdict
 
-USAGE = "Usage: blender --background --python fbx-scifi_city.py -- <fbx_dir>"
+USAGE = "Usage: blender --background --python fbx-scifi_city.py -- <input_dir> <output_dir>"
 
-# TODO: debug these further, let's just see what we can get working easily
-FILES_TO_SKIP = [
-    "SM_LightRayCube.fbx"
+# NOTE: debug these further, let's just see what we can get working easily
+SM_FILES_TO_SKIP = [
+    "SM_LightRayCube.fbx",  # TODO: look at this - has an armature?
 ]
 
 # TODO: validate all of these are correct
@@ -22,9 +27,10 @@ FILE_REPLACEMENTS = {
     "BillboardsGraffiti_01.psd": "Billboards.png",
     "PolygonCity_Road_01.png": "PolygonSciFi_Road_01.png",
     "PolygonCity_Texture_01_A.png": "PolygonScifi_01_A.png",
-    "Signs_Emission.psd": "PolygonScifi_Emissive_01.png",  # TODO: wrong?
+    "Signs_Emission.psd": "PolygonScifi_Emissive_01.png",  # TODO: wrong? they don't seem to line up
     "Neon_Animation.psd": "Billboards.png",
     "PolygonScifi_Texture_Mike.psd": "PolygonScifi_01_A.png",
+    "PolygonSciFiCity_Texture_01_A.png": "PolygonScifi_01_A.png",  # Characters
 }
 
 
@@ -33,31 +39,45 @@ def parse_args():
         argv = sys.argv
         argv = argv[argv.index("--") + 1:]
 
-        if len(argv) < 1:
+        if len(argv) < 2:
             print("ERROR: Not enough arguments provided")
-            print(USAGE)
+            print("Usage: blender --background --python synty-scifi-city.py -- <input_dir> <output_dir>")
             sys.exit(1)
 
         input_path = argv[0]
         if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Path does not exist: {input_path}")
+            raise FileNotFoundError(f"Input path does not exist: {input_path}")
+
+        output_path = argv[1]
+        if not os.path.isdir(output_path):
+            os.mkdir(output_path)
 
     except ValueError:
         print("ERROR: No arguments found after '--'")
-        print(USAGE)
+        print("Usage: blender --background --python synty-scifi-city.py -- <input_dir> <output_dir>")
         sys.exit(1)
 
-    if not os.path.normpath(input_path).endswith("POLYGON_SciFi_City_SourceFiles_v4"):
-        raise ValueError(f"Path does not end in POLYGON_SciFi_City_SourceFiles_v4, pack/version not supported")
-
-    return input_path
+    return input_path, output_path
 
 
-def export_fbx(obj, output_path):
+def select_object_and_children(obj):
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     for child in obj.children_recursive:
         child.select_set(True)
+
+
+def get_root_object(collection):
+    # after import all objects are selected in no particular order, find the root object
+    roots = [obj for obj in collection if obj.parent is None]
+    if len(roots) != 1:
+        raise RuntimeError(f"Expected exactly 1 root object, found {len(roots)}: {[o.name for o in roots]}")
+
+    return roots[0]
+
+
+def export_sm_fbx(obj, output_path):
+    select_object_and_children(obj)
 
     bpy.ops.export_scene.fbx(
         filepath=output_path,
@@ -80,11 +100,8 @@ def export_fbx(obj, output_path):
     )
 
 
-def export_gltf(obj, output_path):
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    for child in obj.children_recursive:
-        child.select_set(True)
+def export_sm_gltf(obj, output_path):
+    select_object_and_children(obj)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ""),
@@ -97,11 +114,8 @@ def export_gltf(obj, output_path):
     )
 
 
-def export_glb(obj, output_path):
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    for child in obj.children_recursive:
-        child.select_set(True)
+def export_sm_glb(obj, output_path):
+    select_object_and_children(obj)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ""),
@@ -261,55 +275,103 @@ def deduplicate_materials():
             bpy.data.materials.remove(dup)
 
 
-def main():
-    input_path = parse_args()
+def process_characters(fbx_file, output_path):
+    print(f"\n=== Processing {fbx_file}")
 
-    print(f"=== Input path: {input_path}")
+    # clear Blender scene
+    bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # Get paths
-    fbx_path = os.path.join(input_path, "Source_Files", "FBX")
-    if not os.path.isdir(fbx_path):
-        raise FileNotFoundError(f"FBX path not found")
+    bpy.ops.import_scene.fbx(
+        filepath=fbx_file,
+        use_anim=False,
+        ignore_leaf_bones=False,
+        force_connect_children=False,
+        # automatic_bone_orientation=False,
+        automatic_bone_orientation=True,
+    )
 
-    textures_path = os.path.join(input_path, "Source_Files", "Textures")
-    if not os.path.isdir(textures_path):
-        raise FileNotFoundError(f"Textures path not found")
+    # after import all objects are selected in no particular order, find the root object
+    root_obj = get_root_object(bpy.context.selected_objects)
+    print(f"Root object: {root_obj.name}")
 
-    output_path = os.path.join("output", "synty-scifi-city_objects")
-    if not os.path.isdir(output_path):
-        os.mkdir(output_path)
-        if not os.path.isdir(output_path):
-            raise FileNotFoundError(f"Output path not found")
+    mesh_children = [c for c in root_obj.children_recursive if c.type == 'MESH']
 
-    # copy textures to output dir so our relative paths will work
-    output_textures_path = os.path.join(output_path, "textures")
-    if os.path.exists(output_textures_path):
-        shutil.rmtree(output_textures_path)
-    shutil.copytree(textures_path, output_textures_path)
+    if not mesh_children:
+        raise RuntimeError(f"No meshes found under armature {root_obj.name}")
 
-    # Get all matching files
-    fbx_files = []
-    for filename in os.listdir(fbx_path):
-        if filename.lower().endswith(".fbx"):
-            full_path = os.path.join(fbx_path, filename)
-            fbx_files.append(full_path)
+    for mesh in mesh_children:
+        fix_missing_mesh_materials(mesh)
+        print(f"Exporting mesh: {mesh.name}")
 
-    fbx_files.sort()
-    print(f"\n=== Found {len(fbx_files)} FBX files to process")
+        # Select the armature + this mesh only
+        bpy.ops.object.select_all(action='DESELECT')
+        root_obj.select_set(True)
+        mesh.select_set(True)
 
+        # Export to GLB or FBX
+        out_file = os.path.join(output_path, f"Character-{mesh.name}.fbx")
+        bpy.ops.export_scene.fbx(
+            filepath=out_file,
+            use_selection=True,
+            bake_anim=False,
+            # # Embedding textures
+            # embed_textures=True,
+            # path_mode='COPY',
+            # Referencing textures
+            embed_textures=False,
+            path_mode='RELATIVE',
+            # # These are for armatures
+            # bake_anim_use_all_actions=False,
+            # bake_anim_use_nla_strips=True,
+            add_leaf_bones=False,
+            # # Not sure if we need these to fix facing
+            # apply_scale_options='FBX_SCALE_UNITS',
+            # axis_forward='-Z',
+            # axis_up='Y',
+        )
+
+        print(f"✅ Exported: {out_file}")
+
+    select_object_and_children(root_obj)
+    bpy.ops.export_scene.fbx(
+        filepath=os.path.join(output_path, f"Character-AllMeshes.fbx"),
+        use_selection=True,
+        bake_anim=False,
+        # # Embedding textures
+        # embed_textures=True,
+        # path_mode='COPY',
+        # Referencing textures
+        embed_textures=False,
+        path_mode='RELATIVE',
+        # # These are for armatures
+        # bake_anim_use_all_actions=False,
+        # bake_anim_use_nla_strips=True,
+        add_leaf_bones=False,
+        # # Not sure if we need these to fix facing
+        # apply_scale_options='FBX_SCALE_UNITS',
+        # axis_forward='-Z',
+        # axis_up='Y',
+    )
+
+
+def process_files(fbx_files, output_path):
     # Process files
     skipped_files = []
     for fbx_file in fbx_files:
-        # NOTE: debug testing
+        # NOTE: debug testing - syr has multiple meshes
         # if "sm_wep_syr" not in fbx_file.lower():
         #     continue
+
+        if os.path.basename(fbx_file) == "Characters.fbx":
+            process_characters(fbx_file, output_path)
+            continue
 
         if not os.path.basename(fbx_file).lower().startswith("sm_"):
             print(f"\n=== Skipping file that does not start with sm_: {fbx_file}")
             skipped_files.append(fbx_file)
             continue
 
-        if os.path.basename(fbx_file) in FILES_TO_SKIP:
+        if os.path.basename(fbx_file) in SM_FILES_TO_SKIP:
             print(f"\n=== Skipping file in FILES_TO_SKIP: {fbx_file}")
             skipped_files.append(fbx_file)
             continue
@@ -333,17 +395,11 @@ def main():
         print(f"Scene objects: {len(bpy.context.scene.objects)}")
 
         # after import all objects are selected in no particular order, find the root object
-        roots = [obj for obj in bpy.context.selected_objects if obj.parent is None]
-        if len(roots) != 1:
-            raise RuntimeError(f"Expected exactly 1 root object, found {len(roots)}: {[o.name for o in roots]}")
-
-        root_obj = roots[0]
+        root_obj = get_root_object(bpy.context.selected_objects)
         print(f"Root object: {root_obj.name}")
 
         # select root and all children for export
-        root_obj.select_set(True)
-        for child in root_obj.children_recursive:
-            child.select_set(True)
+        select_object_and_children(root_obj)
 
         # collect all objects under root
         all_objects = [root_obj] + list(root_obj.children_recursive)
@@ -367,15 +423,49 @@ def main():
         debug_image_datablocks()
 
         # export object
-        export_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-        # export_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-        # export_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-
-    print("\n\n=== Finished processing")
+        export_sm_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_sm_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_sm_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
 
     print("\n=== Skipped Files:")
     for s_file in skipped_files:
         print(s_file)
+
+
+def main():
+    input_path, output_path = parse_args()
+
+    print(f"=== Input path: {input_path}")
+    print(f"=== Output path: {output_path}")
+
+    # check paths
+    fbx_path = os.path.join(input_path, "Source_Files", "FBX")
+    if not os.path.isdir(fbx_path):
+        raise FileNotFoundError(f"FBX path not found")
+
+    textures_path = os.path.join(input_path, "Source_Files", "Textures")
+    if not os.path.isdir(textures_path):
+        raise FileNotFoundError(f"Textures path not found")
+
+    # copy textures to output dir so our relative paths will work
+    output_textures_path = os.path.join(output_path, "textures")
+    if os.path.exists(output_textures_path):
+        shutil.rmtree(output_textures_path)
+    shutil.copytree(textures_path, output_textures_path)
+
+    # get all FBX files
+    fbx_files = []
+    for filename in os.listdir(fbx_path):
+        if filename.lower().endswith(".fbx"):
+            full_path = os.path.join(fbx_path, filename)
+            fbx_files.append(full_path)
+
+    print(f"\n=== Found {len(fbx_files)} FBX files to process")
+
+    fbx_files.sort()
+    process_files(fbx_files, output_path)
+
+    print("\n\n=== Finished processing")
 
 
 if __name__ == "__main__":
