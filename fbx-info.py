@@ -1,7 +1,9 @@
+"""
+Blender script to output data about an FBX
+"""
 import bpy
 import sys
 import os
-import importlib
 
 USAGE = "Usage: blender --background --python fbx-info.py -- <fbx_file>"
 
@@ -39,10 +41,6 @@ def import_fbx(fbx):
         automatic_bone_orientation=False,
         # automatic_bone_orientation=True,
     )
-
-
-def clear_scene():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
 def debug_skeleton(armature):
@@ -183,10 +181,10 @@ def debug_mesh(mesh):
 
 def main():
     fbx_file = parse_args()
-
-    clear_scene()
-
     print(f"Loading: {fbx_file}\n")
+
+    # clear Blender scene
+    bpy.ops.wm.read_factory_settings(use_empty=True)
 
     import_fbx(fbx_file)
 
