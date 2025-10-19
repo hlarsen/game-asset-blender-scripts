@@ -12,8 +12,8 @@ Changes:
     - De-dupe materials and fix broken material links
     - Copy textures to textures/ dir and reference from files
     - Rename some child objects for clarity (material names, etc.)
-    - Apply transforms for GLB/GLTF (to fix _mesh_ facing issue in Godot import)
-    - Removing vertex colors from Characters (causing Godot import issues, Blender looks fine?)
+    - Apply transforms for GLB/GLTF (to fix mesh facing issue in Godot import)
+    - Removing vertex colors from Characters on FBX export (causing Godot import issues)
     - Maybe other stuff I missed
 
 Issues:
@@ -161,11 +161,6 @@ def fix_missing_mesh_materials(mesh, output_path):
     print(f"\nProcessing mesh: {mesh.name}")
 
     textures_dir = os.path.join(output_path, "textures")
-
-    # remove vertex colors causing Godot import issues
-    while mesh.data.vertex_colors:
-        mesh.data.vertex_colors.remove(mesh.data.vertex_colors[0])
-
     for mat in mesh.data.materials:
         if not mat:
             continue
@@ -371,6 +366,7 @@ def process_characters(fbx_file, output_path):
             embed_textures=False,
             path_mode='RELATIVE',
             add_leaf_bones=False,
+            colors_type='NONE',
         )
 
         print(f"✅ Exported: {out_file}")
@@ -383,6 +379,7 @@ def process_characters(fbx_file, output_path):
         embed_textures=False,
         path_mode='RELATIVE',
         add_leaf_bones=False,
+        colors_type='NONE',
     )
 
 
