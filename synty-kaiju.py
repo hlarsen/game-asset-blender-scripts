@@ -1,7 +1,25 @@
 """
 This is a Blender script to take assets from the Synty Kaiju pack and set them up for easy import into Godot.
 
+This script was tested against POLYGON_Kaiju_SourceFiles_v1
 
+TODO:
+    - Work on Kaiju (more than just a root Armature, need to look)
+    - Test if we need to use colors_type='NONE' on FBX export like for the SciFi City assets (vertex color issue)
+
+Notes:
+    - We import/export Characters and Objects with different options (animation, bones, etc.)
+    - This doesn't fix all files in the asset pack - skipped files are listed at the end of the script run
+
+Changes:
+    - De-dupe materials and fix broken material links
+    - Copy textures to textures/ dir and reference from files
+    - Rename some child objects for clarity (material names, etc.)
+    - Apply transforms for GLB/GLTF (to fix mesh facing issue in Godot import)
+    - Maybe other stuff I missed
+
+Issues:
+    - Some characters appear to have import corruption in Godot (issue is present with original Synty Characters.fbx?)
 """
 import bpy
 import shutil
@@ -22,8 +40,8 @@ FILE_REPLACEMENTS = {
     "Texture_01.psd": "Skybox_Texture_01.png",
     "PolygonGeneric_Texture_01_A.psd": "PolygonKaiju_Texture_01.png",
     "1.png": "Helicopter_Blades.png",
-    "Blender_Default_Mixed_Grid.jpg": "Alts/Kaiju_01_01_A.png",  # i think this should be in the root dir, not Alts
-    "Monkey_01.psd": "Alts/Kaiju_01_01_A.png",  # i think this should be in the root dir, not Alts
+    "Blender_Default_Mixed_Grid.jpg": "Alts/Kaiju_01_01_A.png",  # should probably be in the root dir, not Alts
+    "Monkey_01.psd": "Alts/Kaiju_01_01_A.png",  # should probably be in the root dir, not Alts
 }
 
 
@@ -346,7 +364,7 @@ def process_characters(fbx_file, output_path):
             embed_textures=False,
             path_mode='RELATIVE',
             add_leaf_bones=False,
-            colors_type='NONE',
+            # colors_type='NONE',
         )
 
         print(f"✅ Exported: {out_file}")
@@ -360,13 +378,10 @@ def process_files(fbx_files, output_path):
         # if "sm_wep_syr" not in fbx_file.lower():
         #     continue
 
-        # if "Kaiju" in os.path.basename(fbx_file):
+        # if "Kaiju" in os.path.basename(fbx_file) or "Tail" in os.path.basename(fbx_file):
         if "Tail" in os.path.basename(fbx_file):
             process_characters(fbx_file, output_path)
             continue
-
-        # TODO: debugging characters
-        continue
 
         if not os.path.basename(fbx_file).lower().startswith("sm_"):
             print(f"\n=== Skipping file that does not start with sm_: {fbx_file}")
