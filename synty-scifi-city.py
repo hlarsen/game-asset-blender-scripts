@@ -4,7 +4,7 @@ This is a Blender script to take assets from the Synty SciFi City pack and set t
 Notes:
     - We import/export Characters and Objects with different options (animation, bones, etc.)
     - We output individual Characters as well as a "shared" object with all Character meshes (like the original file)
-    - Export code for glb/gltf is there but not currently enabled (and could probably use a double check)
+    - Export code for glb/gltf is there but not currently enabled (needs testing)
     - This doesn't fix all files in the asset pack - skipped files are listed at the end of the script run
     - We're only reading the FBX and Textures dirs (that covers everything, right?)
 
@@ -468,8 +468,8 @@ def process_files(fbx_files, output_path):
 
         # export object
         export_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-        # export_sm_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
-        # export_sm_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_gltf(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        # export_glb(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
 
     print("\n=== Skipped Files:")
     for s_file in skipped_files:
