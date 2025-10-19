@@ -13,6 +13,7 @@ Changes:
     - Copy textures to textures/ dir and reference from files
     - Rename some child objects for clarity (material names, etc.)
     - Apply transforms for GLB/GLTF (to fix _mesh_ facing issue in Godot import)
+    - Removing vertex colors from Characters (causing Godot import issues, Blender looks fine?)
     - Maybe other stuff I missed
 
 Issues:
@@ -24,7 +25,7 @@ import sys
 import os
 from collections import defaultdict
 
-USAGE = "Usage: blender --background --python fbx-scifi_city.py -- <input_dir> <output_dir>"
+USAGE = "Usage: blender --background --python synty-scifi-city.py -- <input_dir> <output_dir>"
 
 # NOTE: debug these further, let's just see what we can get working easily
 SM_FILES_TO_SKIP = [
@@ -53,7 +54,7 @@ def parse_args():
 
         if len(argv) < 2:
             print("ERROR: Not enough arguments provided")
-            print("Usage: blender --background --python synty-scifi-city.py -- <input_dir> <output_dir>")
+            print(USAGE)
             sys.exit(1)
 
         input_path = argv[0]
@@ -66,7 +67,7 @@ def parse_args():
 
     except ValueError:
         print("ERROR: No arguments found after '--'")
-        print("Usage: blender --background --python synty-scifi-city.py -- <input_dir> <output_dir>")
+        print(USAGE)
         sys.exit(1)
 
     return input_path, output_path
@@ -160,6 +161,10 @@ def fix_missing_mesh_materials(mesh, output_path):
     print(f"\nProcessing mesh: {mesh.name}")
 
     textures_dir = os.path.join(output_path, "textures")
+
+    # remove vertex colors causing Godot import issues
+    while mesh.data.vertex_colors:
+        mesh.data.vertex_colors.remove(mesh.data.vertex_colors[0])
 
     for mat in mesh.data.materials:
         if not mat:
@@ -349,6 +354,9 @@ def process_characters(fbx_file, output_path):
 
     for mesh in mesh_children:
         print(f"   Exporting mesh: {mesh.name}")
+        # print(f"   Material slots: {len(mesh.material_slots)}")
+        # for idx, slot in enumerate(mesh.material_slots):
+        #     print(f"     Slot {idx}: {slot.material.name if slot.material else 'EMPTY'}")
 
         # Select the armature + this mesh only
         bpy.ops.object.select_all(action='DESELECT')
