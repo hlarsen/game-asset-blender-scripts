@@ -2,9 +2,22 @@
 This is a Blender script to take assets from the Synty SciFi City pack and set them up for easy import into Godot.
 
 Notes:
-    - We import/export Characters and Objects with different options, please review
-    - We output individual Characters as well as a "shared" object like the original Synty fbx
-    - This doesn't fix the complete pack - files are listed at the end of the script run
+    - We import/export Characters and Objects with different options (animation, bones, etc.)
+    - We output individual Characters as well as a "shared" object with all Character meshes (like the original file)
+    - Export code for glb/gltf is there but not currently enabled (and could probably use a double check)
+    - This doesn't fix all files in the asset pack - skipped files are listed at the end of the script run
+    - We're only reading the FBX and Textures dirs (that covers everything, right?)
+
+Changes:
+    - Resize armatures to match meshes
+    - De-dupe materials and fix broken material links
+    - Copy textures to textures/ dir and reference from files
+    - Rename some child objects for clarity (material names, etc.)
+
+Issues:
+    - When using apply_all_transforms() (problem or annoyance? can prolly fix)
+      - Meshes "face down" when importing into Godot
+      - Still slight rotation on root armatures (.00009 - can prolly fix)
 """
 import bpy
 import shutil
@@ -76,7 +89,13 @@ def get_root_object(collection):
     return roots[0]
 
 
-def export_sm_fbx(obj, output_path):
+def apply_all_transforms(obj):
+    select_object_and_children(obj)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    bpy.ops.object.select_all(action='DESELECT')
+
+
+def export_fbx(obj, output_path):
     select_object_and_children(obj)
 
     bpy.ops.export_scene.fbx(
@@ -92,7 +111,7 @@ def export_sm_fbx(obj, output_path):
         # # These are for armatures
         # bake_anim_use_all_actions=False,
         # bake_anim_use_nla_strips=True,
-        # add_leaf_bones=False,
+        add_leaf_bones=False,
         # # Not sure if we need these to fix facing
         # apply_scale_options='FBX_SCALE_UNITS',
         # axis_forward='-Z',
@@ -100,11 +119,11 @@ def export_sm_fbx(obj, output_path):
     )
 
 
-def export_sm_gltf(obj, output_path):
+def export_gltf(obj, output_path):
     select_object_and_children(obj)
 
     bpy.ops.export_scene.gltf(
-        filepath=output_path.replace(".fbx", ""),
+        filepath=output_path.replace(".fbx", ".gltf"),
         use_selection=True,
         export_format='GLTF_SEPARATE',
         export_animations=False,
@@ -114,11 +133,11 @@ def export_sm_gltf(obj, output_path):
     )
 
 
-def export_sm_glb(obj, output_path):
+def export_glb(obj, output_path):
     select_object_and_children(obj)
 
     bpy.ops.export_scene.gltf(
-        filepath=output_path.replace(".fbx", ""),
+        filepath=output_path.replace(".fbx", ".glb"),
         use_selection=True,
         export_format='GLB',
         export_animations=False,
@@ -140,7 +159,8 @@ def debug_image_datablocks():
     print("=== End of Images\n")
 
 
-def fix_missing_mesh_materials(mesh):
+def fix_missing_mesh_materials(mesh, output_path):
+    print(f"\nProcessing mesh: {mesh.name}")
     for mat in mesh.data.materials:
         if not mat:
             continue
@@ -157,11 +177,11 @@ def fix_missing_mesh_materials(mesh):
             img_path = node.image.filepath if node.image else "(no path set)"
             print(f"   Image Path: {img_path}")
 
-            if os.path.exists(os.path.abspath(bpy.path.abspath(img_path))) if node.image else False:
+            img_in_output_dir = os.path.exists(os.path.join(output_path, "textures", os.path.basename(img_path)))
+            if img_in_output_dir:
                 print("   ✅ Found")
                 node.image.name = mesh.name
-                texture_path = img_path
-                node.image.filepath = os.path.join("textures", os.path.basename(texture_path))
+                node.image.filepath = os.path.join("textures", os.path.basename(img_path))
                 node.image.filepath_raw = node.image.filepath
             else:
                 print("   ❌ Missing, attempting to fix...")
@@ -171,27 +191,17 @@ def fix_missing_mesh_materials(mesh):
                         img_path = img_path.replace(old_name, new_name)
 
                 # try to find the right one
-                texture_path = os.path.join(
-                    os.getcwd(),
-                    "assets",
-                    "synty",
-                    "POLYGON_SciFi_City_SourceFiles_v4",
-                    "Source_Files",
-                    "Textures",
-                    os.path.basename(img_path)
-                )
-
-                if not os.path.exists(texture_path):
-                    if not os.path.exists(texture_path):
-                        raise FileNotFoundError(f"Could not find texture for object {mesh.name}: {texture_path}")
+                img_path = os.path.join(output_path, "textures", os.path.basename(img_path))
+                if not os.path.exists(img_path):
+                    raise FileNotFoundError(f"Could not find texture for object {mesh.name}: {img_path}")
 
                 node.image.name = os.path.basename(img_path)
-                node.image.filepath = os.path.join("textures", os.path.basename(texture_path))
+                node.image.filepath = os.path.join("textures", os.path.basename(img_path))
                 node.image.filepath_raw = node.image.filepath
 
             mat.name = os.path.basename(img_path)
             node.image.reload()
-            print(f"   Texture node: {node.name}  | Filepath: {texture_path}")
+            print(f"   Texture node: {node.name}  | Filepath: {img_path}")
 
     return mesh
 
@@ -275,6 +285,35 @@ def deduplicate_materials():
             bpy.data.materials.remove(dup)
 
 
+def scale_bones(armature):
+    # scale bones to match meshes without scaling meshes (fixes tiny skeleton)
+    SCALE_FACTOR = 10.0
+
+    print(f"Scaling bones for armature: {armature.name} by factor {SCALE_FACTOR}")
+
+    # Temporarily unparent meshes
+    meshes = [c for c in armature.children_recursive if c.type == 'MESH']
+
+    mesh_parents = {m: m.parent for m in meshes}
+    for m in meshes:
+        m.parent = None
+
+    # Enter edit mode to scale bones
+    select_object_and_children(armature)
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    for bone in armature.data.edit_bones:
+        bone.head *= SCALE_FACTOR
+        bone.tail *= SCALE_FACTOR
+
+    # Return to object mode
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Restore mesh parenting
+    for m, parent in mesh_parents.items():
+        m.parent = armature
+
+
 def process_characters(fbx_file, output_path):
     print(f"\n=== Processing {fbx_file}")
 
@@ -286,29 +325,32 @@ def process_characters(fbx_file, output_path):
         use_anim=False,
         ignore_leaf_bones=False,
         force_connect_children=False,
-        # automatic_bone_orientation=False,
-        automatic_bone_orientation=True,
+        automatic_bone_orientation=False,
+        # automatic_bone_orientation=True,
     )
 
     # after import all objects are selected in no particular order, find the root object
     root_obj = get_root_object(bpy.context.selected_objects)
     print(f"Root object: {root_obj.name}")
 
-    mesh_children = [c for c in root_obj.children_recursive if c.type == 'MESH']
+    scale_bones(root_obj)
+    # apply_all_transforms(root_obj)
 
+    mesh_children = [c for c in root_obj.children_recursive if c.type == 'MESH']
     if not mesh_children:
         raise RuntimeError(f"No meshes found under armature {root_obj.name}")
 
     for mesh in mesh_children:
-        fix_missing_mesh_materials(mesh)
-        print(f"Exporting mesh: {mesh.name}")
+        fix_missing_mesh_materials(mesh, output_path)
+
+    for mesh in mesh_children:
+        print(f"   Exporting mesh: {mesh.name}")
 
         # Select the armature + this mesh only
         bpy.ops.object.select_all(action='DESELECT')
         root_obj.select_set(True)
         mesh.select_set(True)
 
-        # Export to GLB or FBX
         out_file = os.path.join(output_path, f"Character-{mesh.name}.fbx")
         bpy.ops.export_scene.fbx(
             filepath=out_file,
@@ -415,15 +457,17 @@ def process_files(fbx_files, output_path):
         # fix materials for every mesh
         for mesh in all_objects:
             print(f"Fixing materials for: {mesh.name}")
-            fix_missing_mesh_materials(mesh)
+            fix_missing_mesh_materials(mesh, output_path)
 
         deduplicate_images()
         deduplicate_materials()
 
         debug_image_datablocks()
 
+        # apply_all_transforms(root_obj)
+
         # export object
-        export_sm_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
+        export_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))
         # export_sm_gltf(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
         # export_sm_glb(updated_obj, os.path.join(output_path, os.path.basename(fbx_file)))
 
