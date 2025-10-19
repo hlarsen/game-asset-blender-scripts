@@ -12,9 +12,11 @@ Changes:
     - De-dupe materials and fix broken material links
     - Copy textures to textures/ dir and reference from files
     - Rename some child objects for clarity (material names, etc.)
+    - Apply transforms for GLB/GLTF (to fix _mesh_ facing issue in Godot import)
+    - Maybe other stuff I missed
 
 Issues:
-    - Some characters appear to have import corruption in Godot (issue present with original Synty Characters.fbx)
+    - Some characters appear to have import corruption in Godot (issue is present with original Synty Characters.fbx?)
 """
 import bpy
 import shutil
