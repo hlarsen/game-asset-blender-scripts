@@ -4,7 +4,6 @@ This is a Blender script to take assets from the Synty SciFi City pack and set t
 Notes:
     - We import/export Characters and Objects with different options (animation, bones, etc.)
     - We output individual Characters as well as a "shared" object with all Character meshes (like the original file)
-    - Export code for glb/gltf is there but not currently enabled (needs testing)
     - This doesn't fix all files in the asset pack - skipped files are listed at the end of the script run
     - We're only reading the FBX and Textures dirs (that covers everything, right?)
 
@@ -15,9 +14,7 @@ Changes:
     - Rename some child objects for clarity (material names, etc.)
 
 Issues:
-    - When using apply_all_transforms() (problem or annoyance? can prolly fix)
-      - Meshes "face down" when importing into Godot
-      - Still slight rotation on root armatures (.00009 - can prolly fix)
+    - Some characters appear to have import corruption in Godot (issue present with original Synty Characters.fbx)
 """
 import bpy
 import shutil
@@ -89,14 +86,10 @@ def get_root_object(collection):
     return roots[0]
 
 
-def apply_all_transforms(obj):
-    select_object_and_children(obj)
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    bpy.ops.object.select_all(action='DESELECT')
-
-
 def export_fbx(obj, output_path):
     select_object_and_children(obj)
+    # FBX exporter does this automatically (?)
+    # bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     bpy.ops.export_scene.fbx(
         filepath=output_path,
@@ -121,6 +114,7 @@ def export_fbx(obj, output_path):
 
 def export_gltf(obj, output_path):
     select_object_and_children(obj)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ".gltf"),
@@ -135,6 +129,7 @@ def export_gltf(obj, output_path):
 
 def export_glb(obj, output_path):
     select_object_and_children(obj)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
     bpy.ops.export_scene.gltf(
         filepath=output_path.replace(".fbx", ".glb"),
@@ -161,6 +156,9 @@ def debug_image_datablocks():
 
 def fix_missing_mesh_materials(mesh, output_path):
     print(f"\nProcessing mesh: {mesh.name}")
+
+    textures_dir = os.path.join(output_path, "textures")
+
     for mat in mesh.data.materials:
         if not mat:
             continue
@@ -170,38 +168,44 @@ def fix_missing_mesh_materials(mesh, output_path):
             continue
 
         for node in node_tree.nodes:
-            if not node.type == "TEX_IMAGE":
+            if node.type != "TEX_IMAGE":
                 print(f"   Skipping node type {node.type}")
                 continue
 
-            img_path = node.image.filepath if node.image else "(no path set)"
-            print(f"   Image Path: {img_path}")
+            if not node.image:
+                print(f"   ⚠️ Node {node.name} has no image")
+                continue
 
-            img_in_output_dir = os.path.exists(os.path.join(output_path, "textures", os.path.basename(img_path)))
-            if img_in_output_dir:
-                print("   ✅ Found")
-                node.image.name = mesh.name
-                node.image.filepath = os.path.join("textures", os.path.basename(img_path))
-                node.image.filepath_raw = node.image.filepath
+            tex_filename = os.path.basename(node.image.filepath)
+            fs_path = os.path.join(textures_dir, tex_filename)
+
+            if os.path.exists(fs_path):
+                print(f"   ✅ Found on disk: {fs_path}")
+                # Assign absolute path so Blender can load it
+                node.image.filepath = fs_path
+                node.image.filepath_raw = fs_path
+                node.image.reload()
             else:
-                print("   ❌ Missing, attempting to fix...")
-
+                found_replacement = False
                 for old_name, new_name in FILE_REPLACEMENTS.items():
-                    if old_name in img_path:
-                        img_path = img_path.replace(old_name, new_name)
+                    if old_name in tex_filename:
+                        fs_path = os.path.join(textures_dir, new_name)
+                        if os.path.exists(fs_path):
+                            print(f"   🔄 Replaced {tex_filename} -> {new_name}")
+                            node.image.filepath = fs_path
+                            node.image.filepath_raw = fs_path
+                            node.image.reload()
+                            tex_filename = new_name
+                            found_replacement = True
+                            break
 
-                # try to find the right one
-                img_path = os.path.join(output_path, "textures", os.path.basename(img_path))
-                if not os.path.exists(img_path):
-                    raise FileNotFoundError(f"Could not find texture for object {mesh.name}: {img_path}")
+                if not found_replacement:
+                    raise FileNotFoundError(f"Could not find texture for object {mesh.name}: {fs_path}")
 
-                node.image.name = os.path.basename(img_path)
-                node.image.filepath = os.path.join("textures", os.path.basename(img_path))
-                node.image.filepath_raw = node.image.filepath
-
-            mat.name = os.path.basename(img_path)
+            mat.name = tex_filename
+            node.image.filepath_raw = node.image.filepath
             node.image.reload()
-            print(f"   Texture node: {node.name}  | Filepath: {img_path}")
+            print(f"   Texture node: {node.name} | Filepath (relative): {node.image.filepath}")
 
     return mesh
 
@@ -326,7 +330,6 @@ def process_characters(fbx_file, output_path):
         ignore_leaf_bones=False,
         force_connect_children=False,
         automatic_bone_orientation=False,
-        # automatic_bone_orientation=True,
     )
 
     # after import all objects are selected in no particular order, find the root object
@@ -334,7 +337,6 @@ def process_characters(fbx_file, output_path):
     print(f"Root object: {root_obj.name}")
 
     scale_bones(root_obj)
-    # apply_all_transforms(root_obj)
 
     mesh_children = [c for c in root_obj.children_recursive if c.type == 'MESH']
     if not mesh_children:
@@ -356,20 +358,9 @@ def process_characters(fbx_file, output_path):
             filepath=out_file,
             use_selection=True,
             bake_anim=False,
-            # # Embedding textures
-            # embed_textures=True,
-            # path_mode='COPY',
-            # Referencing textures
             embed_textures=False,
             path_mode='RELATIVE',
-            # # These are for armatures
-            # bake_anim_use_all_actions=False,
-            # bake_anim_use_nla_strips=True,
             add_leaf_bones=False,
-            # # Not sure if we need these to fix facing
-            # apply_scale_options='FBX_SCALE_UNITS',
-            # axis_forward='-Z',
-            # axis_up='Y',
         )
 
         print(f"✅ Exported: {out_file}")
@@ -379,20 +370,9 @@ def process_characters(fbx_file, output_path):
         filepath=os.path.join(output_path, f"Character-AllMeshes.fbx"),
         use_selection=True,
         bake_anim=False,
-        # # Embedding textures
-        # embed_textures=True,
-        # path_mode='COPY',
-        # Referencing textures
         embed_textures=False,
         path_mode='RELATIVE',
-        # # These are for armatures
-        # bake_anim_use_all_actions=False,
-        # bake_anim_use_nla_strips=True,
         add_leaf_bones=False,
-        # # Not sure if we need these to fix facing
-        # apply_scale_options='FBX_SCALE_UNITS',
-        # axis_forward='-Z',
-        # axis_up='Y',
     )
 
 
@@ -463,8 +443,6 @@ def process_files(fbx_files, output_path):
         deduplicate_materials()
 
         debug_image_datablocks()
-
-        # apply_all_transforms(root_obj)
 
         # export object
         export_fbx(root_obj, os.path.join(output_path, os.path.basename(fbx_file)))

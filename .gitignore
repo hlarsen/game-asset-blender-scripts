@@ -5,3 +5,4 @@
 # working with files locally
 assets/
 output/
+tmp/
