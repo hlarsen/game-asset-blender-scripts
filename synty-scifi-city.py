@@ -1,6 +1,8 @@
 """
 This is a Blender script to take assets from the Synty SciFi City pack and set them up for easy import into Godot.
 
+This script was tested against POLYGON_SciFi_City_SourceFiles_v4
+
 Notes:
     - We import/export Characters and Objects with different options (animation, bones, etc.)
     - We output individual Characters as well as a "shared" object with all Character meshes (like the original file)

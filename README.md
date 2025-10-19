@@ -12,6 +12,7 @@ These scripts run via blender: `blender --background --python <script>.py -- <op
 run `blender --background --python <script>.py` for usage help.
 
 - `fbx-info.py`: Reads an FBX and outputs some of its data
+- `synty-kaiju.py`: Processes the Synty Kaiju pack to fix materials and other cleanup
 - `synty-scifi-city.py`: Processes the Synty Sci-Fi City pack to fix materials and other cleanup
 
 ## Assets and Goals
