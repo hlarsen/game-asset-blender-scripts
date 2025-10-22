@@ -12,6 +12,8 @@ These scripts run via blender: `blender --background --python <script>.py -- <op
 run `blender --background --python <script>.py` for usage help.
 
 - `fbx-info.py`: Reads an FBX and outputs some of its data
+- `mixamo-add-animations-to-character.py`: Adds an animation file to a Mixamo character
+- `mixamo-combine-animations.py`: Combines multiple Mixamo animations into a single file
 - `synty-kaiju.py`: Processes the Synty Kaiju pack to fix materials and other cleanup
 - `synty-scifi-city.py`: Processes the Synty Sci-Fi City pack to fix materials and other cleanup
 
@@ -21,18 +23,23 @@ I've been working with some Synty asset packs I have licenses for, as well as so
 getting more familiar with the file formats in general, another initial goal was to see if I could mix Mixamo and Synty
 characters/animations.
 
-### Future Work
+### Feedback and Future Work
 
-I'll likely continue looking at the other packs I have licenses for as time/interest permits:
+The bone maps in my [godot-synty-tools](https://github.com/hlarsen/godot-synty-tools) repo are an indication of what packs I
+have licenses for - if anyone wants to say thanks by gifting me licenses for other packs I can add those as
+well ;)
 
-- Base Locomotion (The biggest issue is the Rest Pose is not T-pose on these - I have some test code)
-- Casino
-- City
-- Mech
-- Nature Biomes: Arid Desert
+If there are any issues, please let me know.
 
 ## Notes
 
 I am not a 3D modeler or game developer, so if I'm doing anything obviously wrong please feel free to let me know. I've
 been talking with Claude and ChatGPT to help learn the 3D space, but there shouldn't be any blocks of weird opaque
 LLM-generated code anywhere.
+
+My repo [godot-synty-tools](https://github.com/hlarsen/godot-synty-tools) may be useful, it's an addon to work with and
+import Synty assets directly into Godot.
+
+## License
+
+MIT, but if your commercial project does well please consider making a donation <3
