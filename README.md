@@ -42,4 +42,4 @@ import Synty assets directly into Godot.
 
 ## License
 
-MIT, but if your commercial project does well please consider making a donation <3
+MIT, but if your commercial project does well please consider making a donation =)
